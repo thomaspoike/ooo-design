@@ -1,0 +1,26 @@
+    // Incoming micro-op
+    output         io_oup_valid,
+    output  [6:0]  io_oup_bits_uopc, // micro-op code
+    output  [31:0] io_oup_bits_inst, // instruction bits
+    output  [1:0]  io_oup_iw_state, // type of micro-op, valid or not
+    output         io_oup_bits_iw_p1_poisoned,
+                  io_oup_bits_iw_p2_poisoned,
+                  io_oup_bits_is_br,
+                  io_oup_bits_is_jalr,
+                  io_oup_bits_is_jal,
+
+    output  [11:0] io_oup_bits_br_mask, // branch mask
+    output  [6:0]  io_oup_bits_pdst, // destination physical register
+                  io_oup_bits_prs1, // source physical register 1
+                  io_oup_bits_prs2, // source physical register 2
+    output  [4:0]  io_oup_bits_ppred, // prediction bits
+    output         io_oup_bits_prs1_busy, // source physical register 1 busy
+                  io_oup_bits_prs2_busy,
+                  io_oup_bits_ppred_busy,
+
+    output         io_oup_bits_bypassable,
+    output         io_oup_bits_ldst_val, // is there a desitonation? invalid for stores, rd == x0, etc
+    output  [1:0]  io_oup_bits_dst_rtype, // destination register type
+                  io_oup_bits_lrs1_rtype, // source register 1 type
+                  io_oup_bits_lrs2_rtype
+                     // source register 2 type
