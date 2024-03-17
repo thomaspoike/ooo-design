@@ -54,14 +54,14 @@ module issue_slot(
                   io_in_uop_bits_prs3_busy,
                   io_in_uop_bits_ppred_busy,
     // input  [6:0]  io_in_uop_bits_stale_pdst, // stale physical destination
-    // input         io_in_uop_bits_exception,
+    input         io_in_uop_bits_exception,
     // input  [63:0] io_in_uop_bits_exc_cause,
     input         io_in_uop_bits_bypassable,
     // input  [4:0]  io_in_uop_bits_mem_cmd, // memory command
     // input  [1:0]  io_in_uop_bits_mem_size,
-    // input         io_in_uop_bits_mem_signed,
-                  // io_in_uop_bits_is_fence, // is fence, which is a memory barrier
-                  // io_in_uop_bits_is_fencei, // is fencei, which is an instruction barrier
+    input         io_in_uop_bits_mem_signed,
+                  io_in_uop_bits_is_fence, // is fence, which is a memory barrier
+                  io_in_uop_bits_is_fencei, // is fencei, which is an instruction barrier
                   // io_in_uop_bits_is_amo, // is atomic memory operation
                   // io_in_uop_bits_uses_ldq,
                   // io_in_uop_bits_uses_stq,
