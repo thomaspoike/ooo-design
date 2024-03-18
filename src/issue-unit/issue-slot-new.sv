@@ -1,8 +1,8 @@
 interface wakeup_port_if;
     logic valid;
     logic [6:0] bits_pdst;
-    modport producer (output valid, output bits_pdst); // For writing to the interface
-    modport consumer (input valid, input bits_pdst);   // For reading from the interface
+    modport producer (output valid, output bits_pdst); // For writing to the interfacee
+    modport consumer (input valid, input bits_pdst);   // For reading from the inteerface
 endinterface
 
 interface issue_slot_io;
@@ -29,33 +29,39 @@ interface issue_slot_io;
     );
 endinterface
 
-module issue_slot
-    #(
-        parameter NUM_WAKEUP_PORTS = 2;
+module issue_slot #(
+        parameter NUM_WAKEUP_PORTS = 2
     )
     (
     input       clk,
                 reset,
     
     // Output control signals
-    output      io_request,
+    output logic     io_request,
+                io_will_be_valid,
+                io_valid,
     
     // Input control signals
-    input       io_grant,
+    input  logic     io_grant,
                 io_kill,
                 io_clear,
-    //_________________________________
-    // Wakeup ports interface array
-    wakeup_port_if wakeup_ports[NUM_WAKEUP_PORTS]
+    //______________________________
+    // Wakeup ports interfacee array
+    wakeup_port_if.consumer pins,
+    wakeup_port_if wakeup_ports [NUM_WAKEUP_PORTS],
+    input wakeup_ports_valid [NUM_WAKEUP_PORTS-1:0],
+    input [6:0] wakeup_ports_bits_pdst [NUM_WAKEUP_PORTS-1:0],
 
     // Incoming micro-op
-    issue_slot_io io_in_uop  (.input_port),  // Incoming micro-op interface
+    issue_slot_io.input_port io_in_uop, // Incoming micro-op interface
+    input [6:0] io_in_uop_src_id1, io_in_uop_src_id2,
+    input io_in_uop_p1, io_in_uop_p2, io_in_uop_v1, io_in_uop_v2, io_in_uop_ctrl_info,
 
     // Outgoing micro-op
-    issue_slot_io io_out_uop (.output_port), // Outgoing micro-op interface
+    issue_slot_io.output_port io_out_uop, // Outgoing micro-op interface
 
-    // Current slots micro-op interface
-    issue_slot_io io_oup     (.output_port)  // Current slots micro-op interface
+    // Current slots micro-op interfacee
+    issue_slot_io.output_port io_oup  // Current slots micro-op interface
     );
 
     // Need registers for src_id1, P1, v1, src_id2, p2, v2, ctrl_info(Metadata, Dst, Uop, Bypassable, etc.)
@@ -67,8 +73,9 @@ module issue_slot
     reg v1, v2, v1_next, v2_next;
     reg ctrl_info, ctrl_info_next;
 
+
     // Sequential logic
-    always_ff @( clk ) begin : issue_slot_ff
+    always_ff @( posedge clk or negedge reset ) begin : issue_slot_ff
         if (reset) begin
             src_id1 <= 7'b0;
             src_id2 <= 7'b0;
@@ -87,7 +94,7 @@ module issue_slot
             v2 <= v2_next;
             ctrl_info <= ctrl_info_next;
         end
-    end    
+    end
 
     // Combinational logic
     // Request logic
@@ -114,36 +121,43 @@ module issue_slot
 
     // ctrl_info_next / src_id1_next / src_id2_next
     always_comb begin : combinational_logic
-        ctrl_info_next = io_in_uop.ctrl_info;
-        src_id1_next = io_in_uop.src_id1;
-        src_id2_next = io_in_uop.src_id2;
+        if (io_in_uop.valid) begin
+            ctrl_info_next = io_in_uop.ctrl_info;
+            src_id1_next = io_in_uop.src_id1;
+            src_id2_next = io_in_uop.src_id2;
+        end
+        else begin
+            ctrl_info_next = ctrl_info;
+            src_id1_next = src_id1;
+            src_id2_next = src_id2;
+        end
     end
 
-    // v1_next / v2_next logic / 
+    // 1_next / v2_next logic / 
     always_comb begin : valid
         // Valid is the same as the valid of the incoming micro-op
         // Keep valid from the incoming micro-op until the micro-op is issued
         if (io_grant) begin
             v1_next = 1'b0;
             v2_next = 1'b0;
+            io_will_be_valid = 1'b0;
         end
         else begin
             v1_next = io_in_uop.v1 | v1;
             v2_next = io_in_uop.v2 | v2;
+            io_will_be_valid = (v1_next | v2_next);
         end
     end
 
     // Output micro-op
-    always_ff @(posedge clk) begin : output_micro_op
-        //if (io_grant) begin
-        io_out_uop.src_id1 <= src_id1;
-        io_out_uop.src_id2 <= src_id2;
-        io_out_uop.p1 <= p1;
-        io_out_uop.p2 <= p2;
-        io_out_uop.v1 <= v1;
-        io_out_uop.v2 <= v2;
-        io_out_uop.ctrl_info <= ctrl_info;
-        //end
+    always_comb begin : output_micro_op
+        io_out_uop.src_id1 = src_id1;
+        io_out_uop.src_id2 = src_id2;
+        io_out_uop.p1 = p1;
+        io_out_uop.p2 = p2;
+        io_out_uop.v1 = v1;
+        io_out_uop.v2 = v2;
+        io_out_uop.ctrl_info = ctrl_info;
     end
 
 
