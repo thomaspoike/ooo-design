@@ -1,177 +1,164 @@
-interface uop_interface();
-
-    // Signals
-    logic         valid;
-    logic [6:0]   bits_uopc; // micro-op code
-    logic [31:0]  bits_inst; // instruction bits
-    logic [1:0]   iw_state; // type of micro-op, valid or not
-    logic         bits_iw_p1_poisoned, bits_iw_p2_poisoned, bits_is_br, bits_is_jalr, bits_is_jal, bits_is_fence, bits_is_fencei;
-    logic [11:0]  bits_br_mask; // branch mask
-    logic [6:0]   bits_pdst, bits_prs1, bits_prs2; // physical registers
-    logic [4:0]   bits_ppred; // prediction bits
-    logic         bits_prs1_busy, bits_prs2_busy, bits_ppred_busy;
-    logic         bits_exception, bits_bypassable, bits_ldst_val;
-    logic [1:0]   bits_dst_rtype, bits_lrs1_rtype, bits_lrs2_rtype; // register types
-
-    // Modports
-    modport input_port (
-        input valid, bits_uopc, bits_inst, iw_state,
-        input bits_iw_p1_poisoned, bits_iw_p2_poisoned, bits_is_br, bits_is_jalr, bits_is_jal, bits_is_fence, bits_is_fencei,
-        input bits_br_mask, bits_pdst, bits_prs1, bits_prs2, bits_ppred, bits_prs1_busy, bits_prs2_busy, bits_ppred_busy,
-        input bits_exception, bits_bypassable, bits_ldst_val, bits_dst_rtype, bits_lrs1_rtype, bits_lrs2_rtype
-    );
-
-    modport output_port (
-        output valid, bits_uopc, bits_inst, iw_state,
-        output bits_iw_p1_poisoned, bits_iw_p2_poisoned, bits_is_br, bits_is_jalr, bits_is_jal,
-        output bits_br_mask, bits_pdst, bits_prs1, bits_prs2, bits_ppred, bits_prs1_busy, bits_prs2_busy, bits_ppred_busy,
-        output bits_bypassable, bits_ldst_val, bits_dst_rtype, bits_lrs1_rtype, bits_lrs2_rtype
-    );
-
+interface wakeup_port_if;
+    logic valid;
+    logic [6:0] bits_pdst;
+    modport producer (output valid, output bits_pdst); // For writing to the interfacee
+    modport consumer (input valid, input bits_pdst);   // For reading from the inteerface
 endinterface
 
-module issue_slot(
+interface issue_slot_io;
+    // 
+    logic [6:0] src_id1;
+    logic p1;
+    logic v1;
+
+    logic [6:0] src_id2;
+    logic p2;
+    logic v2;
+
+    // Static info for the micro-op (type of required ALU, etc.)
+    logic ctrl_info;
+
+    // Incoming micro-op
+    modport input_port (
+        input src_id1, p1, v1, src_id2, p2, v2, ctrl_info
+    );
+    
+    // Outgoing micro-op
+    modport output_port (
+        output src_id1, p1, v1, src_id2, p2, v2, ctrl_info
+    );
+endinterface
+
+module issue_slot #(
+        parameter NUM_WAKEUP_PORTS = 2
+    )
+    (
     input       clk,
                 reset,
     
     // Output control signals
-    output      io_valid,
+    output logic     io_request,
                 io_will_be_valid,
-                io_request,
+                io_valid,
     
     // Input control signals
-    input       io_grant,
+    input  logic     io_grant,
                 io_kill,
                 io_clear,
+    //______________________________
+    // Wakeup ports interfacee array
+    wakeup_port_if.consumer wakeup_ports [NUM_WAKEUP_PORTS],
+    input wakeup_ports_valid [NUM_WAKEUP_PORTS-1:0],
+    input [6:0] wakeup_ports_bits_pdst [NUM_WAKEUP_PORTS-1:0],
 
-    // Wakeup signals
-    input       io_wakeup_ports_0_valid,
-    input [6:0] io_wakeup_ports_0_bits_pdst,
-
-    input       io_wakeup_ports_1_valid,
-    input [6:0] io_wakeup_ports_1_bits_pdst,
-
-    //_________________________________
     // Incoming micro-op
-    uop_interface io_in_uop  (.input_port),  // Incoming micro-op interface
-    uop_interface io_out_uop (.output_port), // Outgoing micro-op interface
-    uop_interface io_oup     (.output_port)  // Current slots micro-op interface
+    issue_slot_io.input_port io_in_uop, // Incoming micro-op interface
+    input [6:0] io_in_uop_src_id1, io_in_uop_src_id2,
+    input io_in_uop_p1, io_in_uop_p2, io_in_uop_v1, io_in_uop_v2, io_in_uop_ctrl_info,
+
+    // Outgoing micro-op
+    issue_slot_io.output_port io_out_uop, // Outgoing micro-op interface
+
+    // Current slots micro-op interfacee
+    issue_slot_io.output_port io_oup  // Current slots micro-op interface
     );
 
-// slot invalid?
-// slot is valid, holding 1 uop
-// slot is valid, holding 2 uops
-localparam s_invalid = 2b'00;
-localparam s_valid_1 = 2b'01;
-//localparam s_valid_2 = 2b'10;
-wire is_valid, is_invalid;
-assign is_invalid = (state == s_invalid);
-assign is_valid = (state != s_invalid);
+    // Need registers for src_id1, P1, v1, src_id2, p2, v2, ctrl_info(Metadata, Dst, Uop, Bypassable, etc.)
+    // Need combinational logic
+    reg [NUM_WAKEUP_PORTS-1:0] wakeup_ports_src_id1;
+    reg [NUM_WAKEUP_PORTS-1:0] wakeup_ports_src_id2;
+    reg [6:0] src_id1, src_id2, src_id1_next, src_id2_next;
+    reg p1, p2, p1_next, p2_next;
+    reg v1, v2, v1_next, v2_next;
+    reg ctrl_info, ctrl_info_next;
 
 
-// need to create flip-flop for state, p1, p2, ppred, slot_uop, p1_poisoned, p2_poisoned, metadata
-reg [1:0] state, next_state;
-reg p1, next_p1;
-reg p2, next_p2;
-reg ppred, next_ppred;
-reg [31:0] slot_uop, next_slot_uop;
-reg bypassable, next_bypassable;
-reg         p1_poisoned;
-reg         p2_poisoned;
-
-// Sequential logic
-// State
-always @(posedge clock ) begin : state_transition
-    if (reset) begin
-        state <= s_invalid;
-    end else begin
-        if (io_kill) begin
-            state = s_invalid;
-        end else if (io_in_uop.valid) begin
-            state = io_in_uop_iw_state;
-        end else if (io_clear) begin
-            state = s_invalid;
-        end else begin
-            state = state;
-        end;
+    // Sequential logic
+    always_ff @( posedge clk or negedge reset ) begin : issue_slot_ff
+        if (reset) begin
+            src_id1 <= 7'b0;
+            src_id2 <= 7'b0;
+            p1 <= 1'b0;
+            p2 <= 1'b0;
+            v1 <= 1'b0;
+            v2 <= 1'b0;
+            ctrl_info <= 1'b0;
+        end
+        else begin
+            src_id1 <= src_id1_next;
+            src_id2 <= src_id2_next;
+            p1 <= p1_next;
+            p2 <= p2_next;
+            v1 <= v1_next;
+            v2 <= v2_next;
+            ctrl_info <= ctrl_info_next;
+        end
     end
-end
 
-// Combined state transitions for p1, p2, ppred, slot_uop, p1_poisoned, and p2_poisoned
-always @(posedge clock or reset) begin : combined_transitions
-    if (reset) begin
-        p1 <= 1'b0;
-        p2 <= 1'b0;
-        ppred <= 1'b0;
-        slot_uop <= 32'b0;
-        p1_poisoned <= 1'b0;
-        p2_poisoned <= 1'b0;
-    end else begin
-        p1 <= next_p1;
-        p2 <= next_p2;
-        ppred <= next_ppred;
-        slot_uop <= next_slot_uop;
-        p1_poisoned <= next_p1_poisoned;
-        p2_poisoned <= next_p2_poisoned;
+    // Combinational logic
+    // Request logic
+    always_comb begin : request
+        io_request = (p1 & p2 & v1 & v2 & !io_kill);
     end
-end
 
+    // Ready / p1_next / p2_next logic
+    // Need to check if src_id1 is equal to any of the wakeup ports
+    genvar i;
+    generate;
+        for (i = 0; i < NUM_WAKEUP_PORTS; i++) begin : p1_next_gen
+            assign wakeup_ports_src_id1[i] = (wakeup_ports[i].valid) ? (src_id1 == wakeup_ports[i].bits_pdst) : 1'b0;
 
+            assign wakeup_ports_src_id2[i] = (wakeup_ports[i].valid) ? (src_id2 == wakeup_ports[i].bits_pdst) : 1'b0;
+        end
+    endgenerate
 
-
-// Combinatorial logic
-// poison combinatorial logic
-wire        next_p1_poisoned = io_in_uop.valid ? io_in_uop_bits_iw_p1_poisoned : p1_poisoned;
-wire        next_p2_poisoned = io_in_uop.valid ? io_in_uop_bits_iw_p2_poisoned : p2_poisoned;	
-
-// next_state combinatorial logic
-always_comb begin : next_state_comb
-    next_state = state;
-    if (io_kill) begin
-        next_state = s_invalid;
-    end else if (io_grant && state == s_valid_1) begin
-        // Trying to issue
-        next_state = s_invalid;
-    end else if (io_clear) begin
-        next_state = s_invalid;
-    end else begin
-        next_state = state;
+    // p1_next / p2_next logic
+    always_comb begin : p1_p2_next
+        p1_next = |wakeup_ports_src_id1 || p1;
+        p2_next = |wakeup_ports_src_id2 || p2;
     end
-end
 
-// next_slot_uop combinatorial logic
-always_comb begin : next_slot_uop_comb
-    next_slot_uop = slot_uop;
-    if (io_in_uop.valid) begin
-        next_slot_uop = io_in_uop.bits_inst;
-    end else begin
-        next_slot_uop = slot_uop;
+    // ctrl_info_next / src_id1_next / src_id2_next
+    always_comb begin : combinational_logic
+        if (io_in_uop.valid) begin
+            ctrl_info_next = io_in_uop.ctrl_info;
+            src_id1_next = io_in_uop.src_id1;
+            src_id2_next = io_in_uop.src_id2;
+        end
+        else begin
+            ctrl_info_next = ctrl_info;
+            src_id1_next = src_id1;
+            src_id2_next = src_id2;
+        end
     end
-end
 
-
-// next_p1 combinatorial logic should be true if wakeup_ports_0_valid and io_in_uop_bits_pdst match the wakeup_ports_0_bits_pdst
-always_comb begin : next_p1_comb
-    next_p1 = p1;
-    if (io_wakeup_ports_0_valid && !io_out_uop_bits_prs2_busy && (io_in_uop_valid && io_in_uop_bits_pdst == io_wakeup_ports_0_bits_pdst)) begin
-        next_p1 = 1'b1;
-    end else begin
-        next_p1 = 1'b0;
+    // 1_next / v2_next logic / 
+    always_comb begin : valid
+        // Valid is the same as the valid of the incoming micro-op
+        // Keep valid from the incoming micro-op until the micro-op is issued
+        if (io_grant) begin
+            v1_next = 1'b0;
+            v2_next = 1'b0;
+            io_will_be_valid = 1'b0;
+        end
+        else begin
+            v1_next = io_in_uop.v1 | v1;
+            v2_next = io_in_uop.v2 | v2;
+            io_will_be_valid = (v1_next | v2_next);
+        end
     end
-end
 
-// next_p2 combinatorial logic should be true if wakeup_ports_1_valid and io_in_uop_bits_pdst match the wakeup_ports_1_bits_pdst
-always_comb begin : next_p2_comb
-    next_p2 = p2;
-    if (io_wakeup_ports_1_valid && !io_out_uop_bits_prs2_busy && (io_in_uop_valid && io_in_uop_bits_pdst == io_wakeup_ports_1_bits_pdst)) begin
-        next_p2 = 1'b1;
-    end else begin
-        next_p2 = 1'b0;
+    // Output micro-op
+    always_comb begin : output_micro_op
+        io_out_uop.src_id1 = src_id1;
+        io_out_uop.src_id2 = src_id2;
+        io_out_uop.p1 = p1;
+        io_out_uop.p2 = p2;
+        io_out_uop.v1 = v1;
+        io_out_uop.v2 = v2;
+        io_out_uop.ctrl_info = ctrl_info;
     end
-end
 
-// output signals
-assign io_request = is_valid && p1 && p2 && !io_kill;
 
 
 endmodule
